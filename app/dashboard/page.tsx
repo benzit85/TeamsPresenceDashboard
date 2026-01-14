@@ -1,17 +1,20 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useAuth } from "@/providers/auth-provider"
 import { fetchUsers, fetchPresence, fetchUserPhoto } from "@/lib/graph-service"
 import type { User, FilterOptions } from "@/types/graph"
 import UserCard from "@/components/user-card"
 import FilterPanel from "@/components/filter-panel"
 
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes in milliseconds
+
 export default function Dashboard() {
   const { getToken } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [filters, setFilters] = useState<FilterOptions>({
     search: "",
     department: "",
@@ -28,7 +31,7 @@ export default function Dashboard() {
     return Array.from(deptSet).sort()
   }, [users])
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -44,6 +47,7 @@ export default function Dashboard() {
       if (usersData.length === 0) {
         setLoading(false)
         setUsers([])
+        setLastRefresh(new Date())
         return
       }
 
@@ -64,18 +68,25 @@ export default function Dashboard() {
       )
 
       setUsers(usersWithPresence)
+      setLastRefresh(new Date())
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unknown error occurred")
       console.error("Error fetching data:", err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [getToken])
 
+  // Initial fetch and auto-refresh every 5 minutes
   useEffect(() => {
     fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+
+    const intervalId = setInterval(() => {
+      fetchData()
+    }, AUTO_REFRESH_INTERVAL)
+
+    return () => clearInterval(intervalId)
+  }, [fetchData])
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -97,10 +108,29 @@ export default function Dashboard() {
     })
   }, [users, filters])
 
+  const formatLastRefresh = (date: Date | null) => {
+    if (!date) return ""
+    return date.toLocaleString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row">
-        <h2 className="text-2xl font-bold text-[#4E5FBF]">User Directory</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-[#4E5FBF]">User Directory</h2>
+          {lastRefresh && (
+            <p className="text-sm text-gray-500 mt-1">
+              Letzte Aktualisierung: {formatLastRefresh(lastRefresh)} (Auto-Refresh alle 5 Min.)
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
           <button onClick={fetchData} className="rounded bg-[#5864A6] px-4 py-2 text-white hover:bg-[#4E5FBF]">
             Refresh
